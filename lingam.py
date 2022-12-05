@@ -15,23 +15,95 @@ import pandas as pd
 import graphviz
 import lingam
 from lingam.utils import make_dot, print_causal_directions, print_dagc
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-import warnings
 
-# from lingam.utils import make_dot, print_causal_directions, print_dagc
+print([np.__version__, pd.__version__, graphviz.__version__, lingam.__version__])
+np.set_printoptions(precision=3, suppress=True)
+np.random.seed(0)
+#%%
+B0 = [
+[0,-0.12,0,0,0],
+[0,0,0,0,0],
+[-0.41,0.01,0,-0.02,0],
+[0.04,-0.22,0,0,0],
+[0.15,0,-0.03,0,0],
+]
+B1 = [
+[-0.32,0,0.12,0.32,0],
+[0,-0.35,-0.1,-0.46,0.4],
+[0,0,0.37,0,0.46],
+[-0.38,-0.1,-0.24,0,-0.13],
+[0,0,0,0,0],
+]
+causal_order = [1, 0, 3, 2, 4]
+# data generated from B0 and B1
+X = pd.read_csv('https://raw.githubusercontent.com/cdt15/lingam/master/examples/data/sample_data_var_lingam.csv')
 
-# import warnings
-data=pd.read_csv('D:/projects/Seminar/Code/Blockchain/crypto_forcasting/data/features.csv')
-data.set_index("time_stamp",inplace=True,drop=True)
+#%%
+model = lingam.VARLiNGAM()
+model.fit(X)
 
 
 #%%
-np.set_printoptions(precision=3, suppress=True)
-np.random.seed(0)
-causal_order = [2, 0, 1, 3, 4]
-# data generated from psi0 and phi1 and theta1, causal_order
-!kaggle kernels output singh2299/varmalingam-causal -p ./data
+model.causal_order_
 
-X = np.loadtxt('data/sample_data_varma_lingam.csv', delimiter=',')
-model = lingam.VARMALiNGAM(order=(1, 1), criterion=None)
-model.fit(X)
+#%%
+model.adjacency_matrices_[0]
+
+model.adjacency_matrices_[1]
+
+model.residuals_
+
+dlingam = lingam.DirectLiNGAM()
+dlingam.fit(model.residuals_)
+dlingam.adjacency_matrix_
+
+#%%
+labels = ['x0(t)', 'x1(t)', 'x2(t)', 'x3(t)', 'x4(t)', 'x0(t-1)', 'x1(t-1)', 'x2(t-1)', 'x3(t-1)', 'x4(t-1)']
+make_dot(np.hstack(model.adjacency_matrices_), ignore_shape=True, lower_limit=0.05,labels=labels)
+
+#%%
+p_values = model.get_error_independence_p_values()
+print(p_values)
+
+#%%
+model = lingam.VARLiNGAM()
+result = model.bootstrap(X, n_sampling=100)
+
+#%%
+cdc = result.get_causal_direction_counts(n_directions=8, min_causal_effect=0.3, split_by_causal_effect_sign=True)
+
+#%%
+print_causal_directions(cdc, 100, labels=labels)
+
+#%%
+dagc = result.get_directed_acyclic_graph_counts(n_dags=3, min_causal_effect=0.2,split_by_causal_effect_sign=True)
+
+#%%
+print_dagc(dagc, 100, labels=labels)
+
+#%%
+prob = result.get_probabilities(min_causal_effect=0.1)
+print('Probability of B0:\n', prob[0])
+print('Probability of B1:\n', prob[1])
+
+#%%
+causal_effects = result.get_total_causal_effects(min_causal_effect=0.01)
+df = pd.DataFrame(causal_effects)
+df['from'] = df['from'].apply(lambda x : labels[x])
+df['to'] = df['to'].apply(lambda x : labels[x])
+df
+
+#%%
+df.sort_values('effect', ascending=False).head()
+df[df['to']=='x1(t)'].head()
+
+#%%
+
+sns.set()
+# %matplotlib inline
+from_index = 7 # index of x2(t-1). (index:2)+(n_features:5)*(lag:1) = 7
+to_index = 2 # index of x2(t). (index:2)+(n_features:5)*(lag:0) = 2
+plt.hist(result.total_effects_[:, to_index, from_index])
